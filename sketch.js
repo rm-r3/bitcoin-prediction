@@ -411,7 +411,12 @@ function showStatus(message, type) {
   }
 
   statusDiv.html(message);
-  statusDiv.removeClass("status-info status-success status-warning status-error");
+  
+  // Remove all status classes individually (no spaces!)
+  statusDiv.removeClass("status-info");
+  statusDiv.removeClass("status-success");
+  statusDiv.removeClass("status-warning");
+  statusDiv.removeClass("status-error");
 
   if (type) {
     statusDiv.addClass(`status-${type}`);
