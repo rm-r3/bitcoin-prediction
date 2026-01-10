@@ -6,18 +6,17 @@ let trainingDataLoaded = false;
 
 // Setup function runs once at start
 async function setup() {
-  noCanvas(); // No canvas needed for this app
+  noCanvas();
 
   showStatus("Initializing Bitcoin Prediction...", "info");
 
-  // Wait for TensorFlow.js to be ready and set backend
+  // Force WebGL backend (more stable than WebGPU)
   try {
-    await tf.setBackend('webgl'); // Use WebGL instead of WebGPU (more compatible)
+    await tf.setBackend('webgl');
     await tf.ready();
     console.log("✓ TensorFlow.js ready with backend:", tf.getBackend());
   } catch (error) {
     console.error("TensorFlow initialization error:", error);
-    // Try CPU fallback
     try {
       await tf.setBackend('cpu');
       await tf.ready();
@@ -27,118 +26,21 @@ async function setup() {
     }
   }
 
-  // Small delay to ensure backend is fully initialized
+  // Extra delay to ensure backend is fully initialized
   await new Promise(resolve => setTimeout(resolve, 500));
 
-  // Try to load data from Fear & Greed API
-  const success = await loadFearGreedData();
+  // Just use CSV - it works!
+  await loadCSVData();
 
-  if (!success) {
-    // Fallback to CSV if API fails
-    showStatus("API unavailable, loading backup data...", "warning");
-    await loadCSVFallback();
-  }
-
-  // Set up UI buttons
   setupButtons();
-  
-  // Set today's date as default
   setTodaysDate();
 }
 
-// Load data from Fear & Greed Index API
-async function loadFearGreedData() {
-  try {
-    showStatus("Fetching Fear & Greed Index data from API...", "info");
-    console.log("Fetching Fear & Greed Index data...");
-
-    // Fetch all historical data (limit=0 gets everything)
-    const response = await fetch('https://api.alternative.me/fng/?limit=0');
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const result = await response.json();
-
-    if (!result.data || result.data.length === 0) {
-      throw new Error('No data returned from API');
-    }
-
-    console.log(`✓ Loaded ${result.data.length} days of Fear & Greed data`);
-    showStatus(`Processing ${result.data.length} days of data...`, "info");
-
-    // Initialize model with API data
-    await initializeModelWithAPI(result.data);
-
-    return true;
-
-  } catch (error) {
-    console.error('Fear & Greed API error:', error);
-    return false;
-  }
-}
-
-// Initialize ML5 model with Fear & Greed API data
-async function initializeModelWithAPI(fearGreedData) {
-  // CRITICAL: When using addData() manually, we must define the structure first
-  // Configure the neural network with proper input/output definition
-  let options = {
-    task: "classification",
-    debug: false,
-    inputs: 3,  // 3 input values: date, rate, volume
-    outputs: ['Extreme Fear', 'Fear', 'Neutral', 'Greed', 'Extreme Greed']  // All possible labels
-  };
-
-  model = ml5.neuralNetwork(options);
-
-  // Transform and add data to model
-  let dataCount = 0;
-  
-  console.log("Processing Fear & Greed data...");
-  
-  // Process data in reverse (oldest first for better training)
-  for (let i = fearGreedData.length - 1; i >= 0; i--) {
-    const item = fearGreedData[i];
-    
-    // Convert timestamp to date
-    const date = new Date(parseInt(item.timestamp) * 1000);
-    const dateValue = dateToNumeric(date);
-    
-    // Use Fear & Greed value as proxy for price/volume
-    // Scale the 0-100 index value to realistic ranges
-    const fgValue = parseInt(item.value);
-    const rate = 20000 + (fgValue * 1000); // Scale to ~20k-120k range
-    const volume = fgValue * 500000000; // Scale to billions
-    
-    // CRITICAL FIX: ML5.js requires arrays when using addData() manually
-    // Order must match: [input1, input2, input3]
-    const inputs = [dateValue, rate, volume];
-    const outputs = [item.value_classification];
-    
-    model.addData(inputs, outputs);
-    dataCount++;
-  }
-
-  console.log(`✓ Added ${dataCount} data points to model`);
-  
-  // Wait for TensorFlow to be fully ready
-  await new Promise(resolve => setTimeout(resolve, 500));
-  
-  try {
-    model.normalizeData();
-    trainingDataLoaded = true;
-    isModelReady = true;
-    showStatus(`Model ready with ${dataCount} data points! Click 'Train Model' to begin.`, "success");
-  } catch (error) {
-    console.error("Error normalizing data:", error);
-    showStatus("Error initializing model. Please refresh the page.", "error");
-  }
-}
-
-// Fallback: Load CSV data if API fails
-async function loadCSVFallback() {
+// Load CSV data (this method works!)
+async function loadCSVData() {
   return new Promise((resolve) => {
+    showStatus("Loading training data...", "info");
+    
     let options = {
       dataUrl: "dataset_btc_fear_greed_copy.csv",
       inputs: ["date", "volume", "rate"],
@@ -148,19 +50,21 @@ async function loadCSVFallback() {
     };
 
     model = ml5.neuralNetwork(options, async () => {
-      console.log("✓ Model loaded with CSV backup data");
+      console.log("✓ Model loaded with training data");
       
-      // Wait for TensorFlow to be ready
       await new Promise(r => setTimeout(r, 500));
       
       try {
         model.normalizeData();
         trainingDataLoaded = true;
         isModelReady = true;
-        showStatus("Model ready with backup data! Click 'Train Model' to begin.", "success");
+        
+        // Get the row count from the CSV
+        showStatus("Model ready! Click 'Train Model' to begin.", "success");
+        console.log("✓ Ready to train");
       } catch (error) {
-        console.error("Error normalizing CSV data:", error);
-        showStatus("Error loading backup data. Please refresh.", "error");
+        console.error("Error normalizing data:", error);
+        showStatus("Error loading data. Please refresh.", "error");
       }
       
       resolve();
@@ -168,21 +72,17 @@ async function loadCSVFallback() {
   });
 }
 
-// Set up UI buttons
 function setupButtons() {
-  // Fetch live data button
   const fetchButton = select("#fetchData");
   if (fetchButton) {
     fetchButton.mousePressed(fetchLiveData);
   }
 
-  // Train button
   const trainButton = select("#train");
   if (trainButton) {
     trainButton.mousePressed(trainModel);
   }
 
-  // Predict button
   const predictButton = select("#predict");
   if (predictButton) {
     predictButton.mousePressed(classify);
@@ -237,11 +137,9 @@ function finishedTraining() {
   showStatus("Training complete! Enter data and click 'Predict' to see results.", "success");
 }
 
-// Fetch live Bitcoin data from multiple APIs
 async function fetchLiveData() {
   showStatus("Fetching live Bitcoin data...", "info");
 
-  // Try multiple APIs in sequence
   const apis = [
     {
       name: "CoinGecko",
@@ -272,7 +170,6 @@ async function fetchLiveData() {
     }
   ];
 
-  // Try each API in sequence
   for (let api of apis) {
     try {
       console.log(`Trying ${api.name}...`);
@@ -286,11 +183,9 @@ async function fetchLiveData() {
         const data = await response.json();
         const parsed = api.parse(data);
 
-        // Update input fields
         select("#rate").value(Math.round(parsed.price));
         select("#volume").value(Math.round(parsed.volume));
 
-        // Update timestamp
         const now = new Date();
         const changeText = parsed.change ? ` | 24h Change: ${parsed.change.toFixed(2)}%` : '';
         select("#lastUpdate").html(
@@ -307,7 +202,6 @@ async function fetchLiveData() {
     }
   }
 
-  // All APIs failed
   console.error("All APIs failed - using sample data");
   showStatus("API unavailable. Using sample values. You can edit them manually.", "warning");
 
@@ -322,23 +216,19 @@ function classify() {
     return;
   }
 
-  // Get input values
   const dateStr = select("#date").value();
   const rateStr = select("#rate").value();
   const volumeStr = select("#volume").value();
 
-  // Validate inputs
   if (!dateStr || !rateStr || !volumeStr) {
     showStatus("Please fill in all fields (or click 'Fetch Live Data')", "error");
     return;
   }
 
-  // Convert to numeric values
   const dateValue = dateToNumeric(dateStr);
   const rateValue = parseFloat(rateStr);
   const volumeValue = parseFloat(volumeStr);
 
-  // Validate
   if (isNaN(dateValue) || isNaN(rateValue) || isNaN(volumeValue)) {
     showStatus("Invalid input values. Please check your data.", "error");
     return;
@@ -349,8 +239,12 @@ function classify() {
   console.log("  - Rate:", rateValue);
   console.log("  - Volume:", volumeValue);
 
-  // CRITICAL: Must send as array to match training format
-  let userInputs = [dateValue, volumeValue, rateValue];
+  // Use object format for CSV-loaded model
+  let userInputs = {
+    date: dateValue,
+    volume: volumeValue,
+    rate: rateValue
+  };
 
   console.log("Sending to model:", userInputs);
 
@@ -358,7 +252,6 @@ function classify() {
   model.classify(userInputs, gotResults);
 }
 
-// Convert date string to numeric value (days since 2018-01-01)
 function dateToNumeric(dateStr) {
   const inputDate = new Date(dateStr);
   const referenceDate = new Date("2018-01-01");
@@ -375,14 +268,12 @@ function gotResults(error, results) {
 
   console.log("Prediction results:", results);
 
-  // Check if results are valid
   if (!results || results.length === 0) {
     console.error("No results returned from model");
     showStatus("No prediction results. Please retrain the model.", "error");
     return;
   }
 
-  // Check if results have required properties
   const hasValidResults = results.some(r => r.label && r.confidence !== undefined);
   if (!hasValidResults) {
     console.error("Results missing label or confidence:", results);
@@ -390,7 +281,6 @@ function gotResults(error, results) {
     return;
   }
 
-  // Find prediction with highest confidence
   let topPrediction = results[0];
   for (let result of results) {
     if (result.confidence && result.confidence > (topPrediction.confidence || 0)) {
@@ -398,7 +288,6 @@ function gotResults(error, results) {
     }
   }
 
-  // Validate top prediction
   if (!topPrediction.label || topPrediction.confidence === undefined) {
     console.error("Top prediction invalid:", topPrediction);
     showStatus("Could not determine prediction. Please retrain the model.", "error");
@@ -410,7 +299,6 @@ function gotResults(error, results) {
 
   console.log(`Prediction: ${label} (${confidence}% confidence)`);
 
-  // Generate advice based on prediction
   let advice = "";
   let emoji = "";
   let actionClass = "";
@@ -447,7 +335,6 @@ function gotResults(error, results) {
       actionClass = "unknown";
   }
 
-  // Display result
   const resultHTML = `
     <div class="prediction-result ${actionClass}">
       <div class="prediction-header">
@@ -475,7 +362,6 @@ function showStatus(message, type) {
 
   statusDiv.html(message);
   
-  // Remove all status classes individually (no spaces!)
   statusDiv.removeClass("status-info");
   statusDiv.removeClass("status-success");
   statusDiv.removeClass("status-warning");
