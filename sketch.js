@@ -52,13 +52,19 @@ function trainModel() {
     showStatus("Training already in progress...", "warning");
     return;
   }
+  
+  if (!isModelReady) {
+    showStatus("Model not ready yet. Please wait for initialization...", "warning");
+    return;
+  }
 
   isTraining = true;
-  select("#train").html("⏳ Training...");
-  showStatus("Training neural network... This may take a moment.", "info");
+  select("#train").html("Training...");
+  select("#train").style("pointer-events", "none"); // Disable button during training
+  showStatus("Starting training... This will take 30-60 seconds.", "info");
 
   let trainOptions = {
-    epochs: 50, // Increased for better accuracy
+    epochs: 32, // Reduced from 50 for faster training
     batchSize: 32,
   };
 
@@ -78,6 +84,7 @@ function finishedTraining() {
   
   select("#train").html("Trained");
   select("#train").style("background-color", "#31fa03");
+  select("#train").style("pointer-events", "auto"); // Re-enable button
   select("#predict").show();
   
   showStatus("Training complete! Enter data and click 'Predict' to see results.", "success");
