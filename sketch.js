@@ -345,13 +345,18 @@ function classify() {
     return;
   }
 
-  console.log("Classifying with:", { date: dateValue, volume: volumeValue, rate: rateValue });
+  console.log("Classifying with:");
+  console.log("  - Date string:", dateStr, "→ numeric:", dateValue);
+  console.log("  - Rate:", rateValue);
+  console.log("  - Volume:", volumeValue);
 
   let userInputs = {
     date: dateValue,
     volume: volumeValue,
     rate: rateValue,
   };
+
+  console.log("Sending to model:", userInputs);
 
   showStatus("Making prediction...", "info");
   model.classify(userInputs, gotResults);
@@ -374,16 +379,40 @@ function gotResults(error, results) {
 
   console.log("Prediction results:", results);
 
+  // Check if results are valid
+  if (!results || results.length === 0) {
+    console.error("No results returned from model");
+    showStatus("No prediction results. Please retrain the model.", "error");
+    return;
+  }
+
+  // Check if results have required properties
+  const hasValidResults = results.some(r => r.label && r.confidence !== undefined);
+  if (!hasValidResults) {
+    console.error("Results missing label or confidence:", results);
+    showStatus("Invalid prediction results. Please retrain the model.", "error");
+    return;
+  }
+
   // Find prediction with highest confidence
   let topPrediction = results[0];
   for (let result of results) {
-    if (result.confidence > topPrediction.confidence) {
+    if (result.confidence && result.confidence > (topPrediction.confidence || 0)) {
       topPrediction = result;
     }
   }
 
+  // Validate top prediction
+  if (!topPrediction.label || topPrediction.confidence === undefined) {
+    console.error("Top prediction invalid:", topPrediction);
+    showStatus("Could not determine prediction. Please retrain the model.", "error");
+    return;
+  }
+
   const label = topPrediction.label;
   const confidence = (topPrediction.confidence * 100).toFixed(1);
+
+  console.log(`Prediction: ${label} (${confidence}% confidence)`);
 
   // Generate advice based on prediction
   let advice = "";
