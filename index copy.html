@@ -3,25 +3,21 @@
 
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Bitcoin Prediction - Neural Network</title>
-  <meta
-    name="description"
-    content="Educational Bitcoin price prediction using neural networks and the Fear & Greed Index"
-  />
-
+  <meta name="description" content="Educational Bitcoin price prediction using neural networks and the Fear & Greed Index">
+  
   <!-- Favicon -->
-  <link rel="icon" type="image/png" sizes="96x96" href="./favicon_btc_96x96.png" />
-
-  <link rel="stylesheet" type="text/css" href="./style.css" />
-
-  <!-- Libraries (order matters) -->
-  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-  <script defer src="https://unpkg.com/ml5@latest/dist/ml5.min.js"></script>
-
-  <!-- Your code last -->
-  <script defer src="./sketch.js"></script>
+  <link rel="icon" type="image/png" href="favicon_btc_96x96.png">
+  
+  <link rel="stylesheet" type="text/css" href="style.css">
+  
+  <!-- Load TensorFlow.js first (required by ML5.js) -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0/dist/tf.min.js"></script>
+  
+  <!-- Load ML5.js and P5.js from CDN -->
+  <script src="https://unpkg.com/ml5@latest/dist/ml5.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.min.js"></script>
 </head>
 
 <body>
@@ -116,6 +112,7 @@
     </div>
   </div>
 
+  <script src="sketch.js"></script>
 </body>
 
 </html>

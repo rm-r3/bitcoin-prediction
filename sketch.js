@@ -1,260 +1,419 @@
-let neuralModel;
-let isTraining = false;
-let isModelReady = false;
-let dataLoaded = false;
+/* sketch.js — Bitcoin Prediction (ml5 + p5 + PapaParse + CoinGecko)
+   Robust against ml5 callback/promise signature differences.
+*/
 
-async function setup() {
+let neuralModel = null;
+
+let isTraining = false;
+let isModelReady = false; // dataset loaded + model created + normalized
+let isTrained = false; // training complete
+
+let tf = null;
+
+/* -----------------------------
+   p5 entry point (NOT async)
+------------------------------ */
+function setup() {
   noCanvas();
-  
-  console.log("Starting setup...");
-  
-  // Wait for TensorFlow to be ready
-  try {
-    await tf.setBackend('webgl');
-    await tf.ready();
-    console.log("✓ TensorFlow ready:", tf.getBackend());
-  } catch (e) {
-    try {
-      await tf.setBackend('cpu');
-      await tf.ready();
-      console.log("✓ TensorFlow ready (CPU)");
-    } catch (err) {
-      console.error("TensorFlow failed:", err);
-    }
-  }
-  
-  // Extra delay for stability
-  await new Promise(r => setTimeout(r, 1000));
-  
-  // Load CSV data
-  await loadCSVData();
-  
-  // Setup buttons
-  setupButtons();
-  setDate();
+  init().catch((err) => {
+    console.error("Fatal init error:", err);
+    setTrainStatus(`Init failed: ${err?.message ?? err}`, "status-error");
+  });
 }
 
+/* -----------------------------
+   Main init (async)
+------------------------------ */
+async function init() {
+  console.log("Starting init...");
+
+  // Guard: libs loaded
+  if (typeof ml5 === "undefined") {
+    throw new Error("ml5 is not loaded. Check your <script> order.");
+  }
+  if (typeof Papa === "undefined") {
+    throw new Error("PapaParse is not loaded. Add papaparse CDN in index.html.");
+  }
+
+  // Use the TF instance that ml5 uses (prevents version mismatch)
+  tf = ml5.tf;
+  if (!tf) {
+    throw new Error("ml5.tf not available. ml5 may not have loaded correctly.");
+  }
+
+  // Backend init
+  await initTensorFlowBackend();
+
+  // UI
+  setupButtons();
+  setDate();
+  setTrainStatus("Loading dataset…", "status-info");
+
+  // Data
+  await loadCSVData();
+
+  isModelReady = true;
+  setTrainStatus("Dataset loaded. Ready to train.", "status-success");
+  console.log("✓ Init complete");
+}
+
+/* -----------------------------
+   TF backend init
+------------------------------ */
+async function initTensorFlowBackend() {
+  // Prefer WebGL, fallback to CPU
+  try {
+    await tf.setBackend("webgl");
+    await tf.ready();
+    console.log("✓ TensorFlow backend:", tf.getBackend());
+  } catch (e) {
+    console.warn("WebGL backend failed, switching to CPU:", e);
+    await tf.setBackend("cpu");
+    await tf.ready();
+    console.log("✓ TensorFlow backend (CPU):", tf.getBackend());
+  }
+
+  // Small stabilization pause
+  await sleep(200);
+}
+
+/* -----------------------------
+   CSV loading
+------------------------------ */
 function loadCSVData() {
   return new Promise((resolve, reject) => {
-    console.log("Loading CSV...");
-    
-    Papa.parse("dataset_btc_fear_greed_copy.csv", {
+    console.log("Loading CSV…");
+
+    Papa.parse("./dataset_btc_fear_greed_copy.csv", {
       download: true,
       header: true,
       dynamicTyping: true,
-      complete: function(results) {
-        console.log(`✓ Loaded ${results.data.length} rows from CSV`);
-        
-        // Create empty model
+      skipEmptyLines: true,
+      complete: (results) => {
+        const rows = Array.isArray(results.data) ? results.data : [];
+        console.log(`✓ Loaded ${rows.length} rows from CSV`);
+
+        // Create model
         neuralModel = ml5.neuralNetwork({
-          task: 'classification',
+          task: "classification",
           debug: false,
-          inputs: 3,
-          outputs: ['Extreme Fear', 'Fear', 'Neutral', 'Greed', 'Extreme Greed']
+          inputs: ["date", "volume", "rate"],
+          outputs: ["label"],
         });
-        
-        console.log("✓ Created model with 3 inputs, 5 outputs");
-        
-        // Add data
+
+        // Add training data
         let count = 0;
-        results.data.forEach(row => {
-          if (row.date && row.volume && row.rate && row.prediction) {
-            let dateNum = convertDate(row.date);
-            neuralModel.addData(
-              [dateNum, row.volume, row.rate],
-              [row.prediction]
-            );
-            count++;
-          }
-        });
-        
-        console.log(`✓ Added ${count} training examples to model`);
-        
-        // Normalize after delay
-        setTimeout(() => {
+
+        for (const row of rows) {
+          if (!row) continue;
+
+          const dateStr = String(row.date ?? "").trim();
+          const volume = Number(row.volume);
+          const rate = Number(row.rate);
+          const label = String(row.prediction ?? "").trim();
+
+          if (!dateStr || !label) continue;
+          if (!Number.isFinite(volume) || !Number.isFinite(rate)) continue;
+
+          const dateNum = convertDate(dateStr);
+
+          // Object inputs/outputs = most compatible across ml5 versions
+          neuralModel.addData(
+            { date: dateNum, volume, rate },
+            { label }
+          );
+
+          count++;
+        }
+
+        console.log(`✓ Added ${count} training examples`);
+
+        // Normalize
+        try {
           neuralModel.normalizeData();
-          dataLoaded = true;
-          isModelReady = true;
-          console.log("✓ Ready to train");
-          resolve();
-        }, 500);
+          console.log("✓ Normalized data");
+        } catch (e) {
+          console.warn("normalizeData failed (continuing):", e);
+        }
+
+        resolve();
       },
-      error: function(err) {
-        console.error("CSV error:", err);
+      error: (err) => {
+        console.error("CSV parse error:", err);
         reject(err);
-      }
+      },
     });
   });
 }
 
-function convertDate(dateStr) {
-  const parts = dateStr.split('-');
-  if (parts.length === 3) {
-    const y = parseInt(parts[0]);
-    const m = parseInt(parts[1]);
-    const d = parseInt(parts[2]);
-    const inputDate = new Date(y, m - 1, d);
-    const refDate = new Date(2018, 0, 1);
-    const diff = Math.floor((inputDate - refDate) / (1000 * 60 * 60 * 24));
-    return diff;
-  }
-  return 0;
-}
-
+/* -----------------------------
+   UI setup
+------------------------------ */
 function setupButtons() {
-  const trainBtn = select("#train");
-  if (trainBtn) {
-    trainBtn.mousePressed(startTraining);
-  }
-
-  const predictBtn = select("#predict");
-  if (predictBtn) {
-    predictBtn.mousePressed(makePrediction);
-  }
+  select("#train")?.mousePressed(startTraining);
+  select("#predict")?.mousePressed(makePrediction);
+  select("#fetchData")?.mousePressed(fetchLiveData);
 }
 
 function setDate() {
   const today = new Date();
-  const dateStr = today.toISOString().split('T')[0];
-  select("#date").value(dateStr);
+  const dateStr = today.toISOString().split("T")[0];
+  select("#date")?.value(dateStr);
 }
 
-function startTraining() {
-  if (isTraining) {
-    return;
-  }
+function setTrainStatus(text, className = "status-info") {
+  const el = select("#trainStatus");
+  if (!el) return;
 
-  if (!isModelReady || !dataLoaded) {
-    console.log("Model not ready");
+  el.removeClass("status-info");
+  el.removeClass("status-success");
+  el.removeClass("status-warning");
+  el.removeClass("status-error");
+
+  el.addClass(className);
+  el.html(text);
+}
+
+function setResult(html) {
+  select("#result")?.html(html);
+}
+
+/* -----------------------------
+   Training
+------------------------------ */
+function startTraining() {
+  if (isTraining) return;
+
+  if (!isModelReady || !neuralModel) {
+    setTrainStatus("Model not ready yet — wait for dataset load.", "status-warning");
     return;
   }
 
   isTraining = true;
-  select("#train").html("Training...");
-  
-  console.log("Starting training...");
+  isTrained = false;
 
-  let opts = {
+  select("#train")?.html("Training…");
+  setTrainStatus("Training started… (see console for epoch/loss)", "status-info");
+
+  console.log("Starting training…");
+
+  const opts = {
     epochs: 32,
     batchSize: 32,
   };
 
-  neuralModel.train(opts, trainingProgress, trainingDone);
+  neuralModel.train(
+    opts,
+    trainingProgress,
+    trainingDone
+  );
 }
 
 function trainingProgress(epoch, loss) {
-  const lossVal = loss.loss ? loss.loss.toFixed(4) : "...";
+  const lossVal =
+    loss && typeof loss.loss === "number" ? loss.loss.toFixed(4) : "…";
   console.log(`Epoch: ${epoch} - Loss: ${lossVal}`);
 }
 
 function trainingDone() {
   console.log("✓ Training complete!");
+
   isTraining = false;
-  select("#train").html("Trained");
-  select("#train").style("background-color", "#31fa03");
+  isTrained = true;
+
+  select("#train")?.html("Trained");
+  select("#train")?.style("background-color", "#31fa03");
+
+  // Show Predict button
+  select("#predict")?.style("display", "inline-block");
+
+  setTrainStatus("Training complete. You can predict now.", "status-success");
 }
 
+/* -----------------------------
+   Prediction
+------------------------------ */
 function makePrediction() {
-  if (!isModelReady) {
-    console.log("Model not ready");
+  if (!isModelReady || !neuralModel) {
+    setTrainStatus("Model not ready.", "status-warning");
+    return;
+  }
+  if (!isTrained) {
+    setTrainStatus("Train the model first.", "status-warning");
     return;
   }
 
-  const dateStr = select("#date").value();
-  const priceStr = select("#rate").value();
-  const volStr = select("#volume").value();
+  const dateStr = String(select("#date")?.value() ?? "").trim();
+  const rateStr = String(select("#rate")?.value() ?? "").trim();
+  const volStr = String(select("#volume")?.value() ?? "").trim();
 
-  if (!dateStr || !priceStr || !volStr) {
-    console.log("Please fill all fields");
+  if (!dateStr || !rateStr || !volStr) {
+    setTrainStatus("Please fill Date, Price, and Volume.", "status-warning");
     return;
   }
 
   const dateVal = convertDate(dateStr);
-  const priceVal = parseFloat(priceStr);
-  const volVal = parseFloat(volStr);
+  const rateVal = Number(rateStr);
+  const volVal = Number(volStr);
 
-  if (isNaN(dateVal) || isNaN(priceVal) || isNaN(volVal)) {
-    console.log("Invalid values");
+  if (!Number.isFinite(dateVal) || !Number.isFinite(rateVal) || !Number.isFinite(volVal)) {
+    setTrainStatus("Invalid input values.", "status-warning");
     return;
   }
 
-  console.log("Predicting:");
-  console.log("  Date:", dateStr, "→", dateVal);
-  console.log("  Price:", priceVal);
-  console.log("  Volume:", volVal);
+  const input = { date: dateVal, volume: volVal, rate: rateVal };
+  console.log("Classifying with:", input);
 
-  // Send as array
-  let inputs = [dateVal, volVal, priceVal];
+  // Robust classify handling:
+  // - works with callback
+  // - works with Promise return
+  // - works if ml5 passes results as first arg
+  try {
+    const maybePromise = neuralModel.classify(input, handleResults);
 
-  console.log("Inputs:", inputs);
-  
-  neuralModel.classify(inputs, handleResults);
+    if (maybePromise && typeof maybePromise.then === "function") {
+      maybePromise
+        .then((res) => handleResults(null, res))
+        .catch((err) => handleResults(err, null));
+    }
+  } catch (err) {
+    handleResults(err, null);
+  }
 }
 
 function handleResults(error, results) {
+  // Some ml5 versions pass results array as first arg
+  if (Array.isArray(error) && results == null) {
+    results = error;
+    error = null;
+  }
+
   if (error) {
-    console.error("Error:", error);
-    select("#result").html("Prediction failed");
+    console.error("Prediction error:", error);
+    setTrainStatus("Prediction failed (see console).", "status-error");
+    setResult(
+      `<div class="prediction-result"><div class="prediction-label">Prediction failed</div></div>`
+    );
     return;
   }
 
   console.log("Results:", results);
 
   if (!Array.isArray(results) || results.length === 0) {
-    select("#result").html("No results");
+    setTrainStatus("No prediction results.", "status-warning");
+    setResult(
+      `<div class="prediction-result"><div class="prediction-label">No results</div></div>`
+    );
     return;
   }
 
-  const valid = results.some(r => r.label && r.confidence !== undefined);
-  if (!valid) {
-    select("#result").html("Invalid results");
-    return;
-  }
-
-  // Find top prediction
+  // Pick top confidence
   let top = results[0];
-  for (let r of results) {
-    if (r.confidence > top.confidence) {
+  for (const r of results) {
+    if (typeof r?.confidence === "number" && r.confidence > (top?.confidence ?? -1)) {
       top = r;
     }
   }
 
-  const label = top.label;
-  const conf = (top.confidence * 100).toFixed(1);
+  const label = String(top?.label ?? "Unknown");
+  const conf = typeof top?.confidence === "number" ? (top.confidence * 100).toFixed(1) : "0.0";
 
-  console.log(`✓ ${label} (${conf}%)`);
+  const { advice, emoji, cssClass } = labelToAdvice(label);
 
-  let advice = "";
-  let emoji = "";
+  setTrainStatus(`Prediction: ${label} (${conf}%)`, "status-success");
 
-  if (label === "Extreme Fear") {
-    advice = "Buy the dip → STRONG BUY";
-    emoji = "🔥";
-  } else if (label === "Fear") {
-    advice = "Good entry point → BUY";
-    emoji = "😰";
-  } else if (label === "Neutral") {
-    advice = "Market stable → HOLD";
-    emoji = "😐";
-  } else if (label === "Greed") {
-    advice = "Consider profits";
-    emoji = "😎";
-  } else if (label === "Extreme Greed") {
-    advice = "Sell high → SELL";
-    emoji = "🤑";
-  } else {
-    advice = "Unknown";
-    emoji = "❓";
-  }
-
-  const html = `
-    <div style="text-align:center;padding:20px;font-size:1.2em;">
-      <div style="font-size:3em;">${emoji}</div>
-      <div style="font-size:1.8em;margin:10px 0;">${label}</div>
-      <div style="margin:10px 0;">Confidence: ${conf}%</div>
-      <div style="margin:15px 0;">${advice}</div>
+  setResult(`
+    <div class="prediction-result ${cssClass}">
+      <div class="prediction-header">
+        <div class="prediction-emoji">${emoji}</div>
+        <div class="prediction-label">${label}</div>
+      </div>
+      <div class="confidence">Confidence: ${conf}%</div>
+      <div class="advice">${advice}</div>
+      <div class="disclaimer">Educational only — not financial advice.</div>
     </div>
-  `;
+  `);
+}
 
-  select("#result").html(html);
+/* -----------------------------
+   Fetch live data (CoinGecko)
+------------------------------ */
+async function fetchLiveData() {
+  const btn = select("#fetchData");
+  const lastUpdate = select("#lastUpdate");
+
+  btn?.attribute("disabled", "");
+  btn?.html("Fetching…");
+  lastUpdate?.html("Fetching CoinGecko…");
+
+  try {
+    const url =
+      "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_vol=true";
+
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error(`CoinGecko HTTP ${res.status}`);
+
+    const data = await res.json();
+    const price = data?.bitcoin?.usd;
+    const vol = data?.bitcoin?.usd_24h_vol;
+
+    if (typeof price !== "number" || typeof vol !== "number") {
+      throw new Error("Unexpected CoinGecko response format");
+    }
+
+    select("#rate")?.value(Math.round(price));
+    select("#volume")?.value(Math.round(vol));
+
+    const now = new Date();
+    lastUpdate?.html(`Last update: ${now.toLocaleString()}`);
+    console.log("✓ CoinGecko live data:", { price, vol });
+  } catch (err) {
+    console.error("Fetch Live Data failed:", err);
+    lastUpdate?.html(`Fetch failed: ${err?.message ?? err}`);
+  } finally {
+    btn?.removeAttribute("disabled");
+    btn?.html("Fetch Live Data");
+  }
+}
+
+/* -----------------------------
+   Helpers
+------------------------------ */
+function convertDate(dateStr) {
+  // expects YYYY-MM-DD
+  const parts = String(dateStr).split("-");
+  if (parts.length !== 3) return 0;
+
+  const y = Number(parts[0]);
+  const m = Number(parts[1]);
+  const d = Number(parts[2]);
+
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return 0;
+
+  const inputDate = new Date(y, m - 1, d);
+  const refDate = new Date(2018, 0, 1);
+
+  const diffDays = Math.floor((inputDate - refDate) / (1000 * 60 * 60 * 24));
+  return Number.isFinite(diffDays) ? diffDays : 0;
+}
+
+function labelToAdvice(label) {
+  switch (label) {
+    case "Extreme Fear":
+      return { advice: "Buy the dip → STRONG BUY", emoji: "🔥", cssClass: "extreme-fear" };
+    case "Fear":
+      return { advice: "Good entry point → BUY", emoji: "😰", cssClass: "fear" };
+    case "Neutral":
+      return { advice: "Market stable → HOLD", emoji: "😐", cssClass: "neutral" };
+    case "Greed":
+      return { advice: "Consider taking profits", emoji: "😎", cssClass: "greed" };
+    case "Extreme Greed":
+      return { advice: "Sell high → SELL", emoji: "🤑", cssClass: "extreme-greed" };
+    default:
+      return { advice: "Unknown sentiment", emoji: "❓", cssClass: "" };
+  }
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
 }
