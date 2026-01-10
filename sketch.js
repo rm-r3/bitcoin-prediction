@@ -106,16 +106,10 @@ async function initializeModelWithAPI(fearGreedData) {
     const rate = 20000 + (fgValue * 1000); // Scale to ~20k-120k range
     const volume = fgValue * 500000000; // Scale to billions
     
-    // Add to model
-    let inputs = {
-      date: dateValue,
-      rate: rate,
-      volume: volume
-    };
-    
-    let outputs = {
-      prediction: item.value_classification
-    };
+    // CRITICAL FIX: ML5.js requires arrays when using addData() manually
+    // Not objects! This is why labels weren't being stored.
+    const inputs = [dateValue, rate, volume];
+    const outputs = [item.value_classification];
     
     model.addData(inputs, outputs);
     dataCount++;
@@ -350,11 +344,8 @@ function classify() {
   console.log("  - Rate:", rateValue);
   console.log("  - Volume:", volumeValue);
 
-  let userInputs = {
-    date: dateValue,
-    volume: volumeValue,
-    rate: rateValue,
-  };
+  // CRITICAL: Must send as array to match training format
+  let userInputs = [dateValue, volumeValue, rateValue];
 
   console.log("Sending to model:", userInputs);
 
