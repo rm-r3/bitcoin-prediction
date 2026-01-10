@@ -10,13 +10,21 @@ async function setup() {
 
   showStatus("Initializing Bitcoin Prediction...", "info");
 
+  // Wait for TensorFlow.js to be ready
+  try {
+    await tf.ready();
+    console.log("✓ TensorFlow.js ready");
+  } catch (error) {
+    console.error("TensorFlow initialization error:", error);
+  }
+
   // Try to load data from Fear & Greed API
   const success = await loadFearGreedData();
 
   if (!success) {
     // Fallback to CSV if API fails
     showStatus("API unavailable, loading backup data...", "warning");
-    loadCSVFallback();
+    await loadCSVFallback();
   }
 
   // Set up UI buttons
@@ -103,31 +111,39 @@ async function initializeModelWithAPI(fearGreedData) {
 
   console.log(`✓ Added ${dataCount} data points to model`);
   
-  // Normalize the data
-  model.normalizeData();
-  
-  trainingDataLoaded = true;
-  isModelReady = true;
-  
-  showStatus(`Model ready with ${dataCount} data points! Click 'Train Model' to begin.`, "success");
+  // Wait a moment for TensorFlow to be fully ready, then normalize
+  setTimeout(() => {
+    try {
+      model.normalizeData();
+      trainingDataLoaded = true;
+      isModelReady = true;
+      showStatus(`Model ready with ${dataCount} data points! Click 'Train Model' to begin.`, "success");
+    } catch (error) {
+      console.error("Error normalizing data:", error);
+      showStatus("Error initializing model. Please refresh the page.", "error");
+    }
+  }, 100);
 }
 
 // Fallback: Load CSV data if API fails
-function loadCSVFallback() {
-  let options = {
-    dataUrl: "dataset_btc_fear_greed_copy.csv",
-    inputs: ["date", "volume", "rate"],
-    outputs: ["prediction"],
-    task: "classification",
-    debug: false,
-  };
+async function loadCSVFallback() {
+  return new Promise((resolve) => {
+    let options = {
+      dataUrl: "dataset_btc_fear_greed_copy.csv",
+      inputs: ["date", "volume", "rate"],
+      outputs: ["prediction"],
+      task: "classification",
+      debug: false,
+    };
 
-  model = ml5.neuralNetwork(options, () => {
-    console.log("✓ Model loaded with CSV backup data");
-    model.normalizeData();
-    trainingDataLoaded = true;
-    isModelReady = true;
-    showStatus("Model ready with backup data! Click 'Train Model' to begin.", "success");
+    model = ml5.neuralNetwork(options, () => {
+      console.log("✓ Model loaded with CSV backup data");
+      model.normalizeData();
+      trainingDataLoaded = true;
+      isModelReady = true;
+      showStatus("Model ready with backup data! Click 'Train Model' to begin.", "success");
+      resolve();
+    });
   });
 }
 
