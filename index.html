@@ -5,54 +5,29 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <title>Bitcoin Prediction</title>
+  <title>btc no fear</title>
   <link rel="icon" type="image/x-icon" href="/pics/r3_favicon_color.svg">
 
   <link rel="stylesheet" type="text/css" href="style.css">
 
-  <!-- Papa Parse for CSV loading -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
-  <!-- ML5.js for neural network -->
   <script src="https://unpkg.com/ml5@latest/dist/ml5.min.js"></script>
-  <!-- p5.js for DOM manipulation -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/addons/p5.sound.min.js"></script>
 </head>
 
 <body>
   <script src="sketch.js"></script>
-  
-  <h1>Bitcoin Prediction</h1>
-  
-  <div class="disclaimer">
-    Educational purposes only. Not financial advice!
-  </div>
-  
-  <div class="fetch-section">
-    <button id="fetchData" class="fetch-button">Fetch Live Data</button>
-    <p id="lastUpdate"></p>
-  </div>
-  
-  <div class="input-section">
-    <p>Date (YYYY-MM-DD): <input id="date" type="date" /></p>
-    <p>Current Price (USD): <input id="rate" type="number" /></p>
-    <p>24h Volume (USD): <input id="volume" type="number" /></p>
-  </div>
-  
-  <div class="button-section">
-    <button id="train">Train Model</button>
-    <button id="predict" style="display:none;">Predict</button>
-  </div>
-  
-  <p id="trainStatus"></p>
-  <div id="result"></div>
-  
-  <div class="attribution-section">
-    <p>Fear & Greed Index data by 
-      <a href="https://alternative.me/crypto/fear-and-greed-index/" target="_blank">
-        Alternative.me
-      </a>
-    </p>
-  </div>
+  <h1>Bitcoin Advisor</h1>
+  <div>
+  <p> Datum DMYYYY: <input id="date" value="" /></p>
+  <p> Aktueller Kurs in USD: <input id="rate" value="" /></p>
+  <p> Aktuelles Handelsvolumen in USD: <input id="volume" value="" /></p>
+  <p> <button id="train">Train Model</button> </p>
+  <p> <button id="predict">Predict</button> </p>
+  </p>
+  <p id="result"></p>
+</div>
 </body>
 
 </html>
