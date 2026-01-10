@@ -86,53 +86,80 @@ function finishedTraining() {
 async function fetchLiveData() {
   showStatus("Fetching live Bitcoin data...", "info");
   
-  try {
-    // CoinGecko API endpoint (free, no API key needed)
-    const url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_vol=true&include_24hr_change=true";
-    
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
+  // Try multiple APIs in order for better reliability
+  const apis = [
+    {
+      name: "CoinGecko",
+      url: "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_vol=true&include_24hr_change=true",
+      parse: (data) => ({
+        price: data.bitcoin.usd,
+        volume: data.bitcoin.usd_24h_vol,
+        change: data.bitcoin.usd_24h_change
+      })
+    },
+    {
+      name: "CryptoCompare",
+      url: "https://min-api.cryptocompare.com/data/pricemultifull?fsyms=BTC&tsyms=USD",
+      parse: (data) => ({
+        price: data.RAW.BTC.USD.PRICE,
+        volume: data.RAW.BTC.USD.VOLUME24HOURTO,
+        change: data.RAW.BTC.USD.CHANGEPCT24HOUR
+      })
+    },
+    {
+      name: "Blockchain.info",
+      url: "https://blockchain.info/ticker",
+      parse: (data) => ({
+        price: data.USD.last,
+        volume: data.USD['15m'] * 144 * 1000000, // Approximate 24h volume
+        change: 0 // This API doesn't provide change
+      })
+    }
+  ];
+  
+  // Try each API in sequence
+  for (let api of apis) {
+    try {
+      console.log(`Trying ${api.name}...`);
+      
+      const response = await fetch(api.url, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        const parsed = api.parse(data);
+        
+        // Update input fields with live data
+        select("#rate").value(Math.round(parsed.price));
+        select("#volume").value(Math.round(parsed.volume));
+        
+        // Update timestamp
+        const now = new Date();
+        const changeText = parsed.change ? ` | 24h Change: ${parsed.change.toFixed(2)}%` : '';
+        select("#lastUpdate").html(
+          `Data from ${api.name} at ${now.toLocaleTimeString()} - Price: $${Math.round(parsed.price).toLocaleString()}${changeText}`
+        );
+        
+        showStatus(`Live data loaded from ${api.name}!`, "success");
+        console.log(`✓ ${api.name} succeeded`);
+        return; // Success! Exit function
       }
-    });
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    } catch (error) {
+      console.log(`✗ ${api.name} failed:`, error.message);
+      continue; // Try next API
     }
-    
-    const data = await response.json();
-    
-    if (data && data.bitcoin) {
-      const btcData = data.bitcoin;
-      
-      // Update input fields with live data
-      select("#rate").value(Math.round(btcData.usd));
-      select("#volume").value(Math.round(btcData.usd_24h_vol));
-      
-      // Update timestamp
-      const now = new Date();
-      const changeText = btcData.usd_24h_change ? ` | 24h Change: ${btcData.usd_24h_change.toFixed(2)}%` : '';
-      select("#lastUpdate").html(
-        `Data updated: ${now.toLocaleTimeString()} - Price: $${btcData.usd.toLocaleString()}${changeText}`
-      );
-      
-      showStatus("Live data loaded successfully!", "success");
-    } else {
-      throw new Error("Invalid data format received");
-    }
-    
-  } catch (error) {
-    console.error("Error fetching data:", error);
-    
-    // Fallback: Use sample data if API fails
-    showStatus("API unavailable. Using sample values. You can edit them manually.", "warning");
-    
-    // Use realistic sample data
-    select("#rate").value("95000");
-    select("#volume").value("45000000000");
-    select("#lastUpdate").html("Using sample data (API unavailable)");
   }
+  
+  // All APIs failed - use sample data
+  console.error("All APIs failed - using sample data");
+  showStatus("API unavailable. Using sample values. You can edit them manually.", "warning");
+  
+  // Use realistic sample data
+  select("#rate").value("95000");
+  select("#volume").value("45000000000");
+  select("#lastUpdate").html("Using sample data (APIs unavailable)");
 }
 
 function classify() {

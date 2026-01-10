@@ -357,10 +357,17 @@ details {
 summary {
   cursor: pointer;
   font-size: clamp(0.8rem, 2vw, 1rem);
-  padding: 10px;
+  padding: 15px;
   color: #31fa03;
   text-shadow: 0 0 5px #31fa03;
   list-style: none;
+  user-select: none;
+  transition: all 0.3s ease;
+}
+
+summary:hover {
+  color: #50ff22;
+  text-shadow: 0 0 10px #31fa03;
 }
 
 summary::-webkit-details-marker {
@@ -368,13 +375,15 @@ summary::-webkit-details-marker {
 }
 
 summary::before {
-  content: "▶ ";
+  content: "+ ";
   display: inline-block;
+  margin-right: 10px;
   transition: transform 0.3s ease;
+  font-size: 1.2em;
 }
 
 details[open] summary::before {
-  transform: rotate(90deg);
+  content: "- ";
 }
 
 .about-content {
