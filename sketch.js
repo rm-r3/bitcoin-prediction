@@ -1,5 +1,6 @@
 /* sketch.js — Bitcoin Prediction (ml5 + p5 + PapaParse + CoinGecko)
    Robust against ml5 callback/promise signature differences.
+   Includes: visor auto-open during training + auto-hide after training.
 */
 
 let neuralModel = null;
@@ -9,6 +10,84 @@ let isModelReady = false; // dataset loaded + model created + normalized
 let isTrained = false; // training complete
 
 let tf = null;
+
+/* -----------------------------
+   Visor controls (reliable)
+   - record open state at Train click
+   - auto-open on Train
+   - auto-close after Train ONLY if it was closed at Train click
+   - close uses the real UI toggle button (button[1]) with retries
+------------------------------ */
+
+let visorWasOpenAtTrainStart = false;
+
+function getVisorRoot() {
+  return document.querySelector(".visor");
+}
+
+function getVisorButtons() {
+  return document.querySelectorAll(".visor-controls button");
+}
+
+function isVisorOpenNow() {
+  const v = getVisorRoot();
+  if (!v) return false;
+  return v.getAttribute("data-isopen") === "true";
+}
+
+// In your DOM: NodeList [button, button] and [1] closes it.
+// We'll always click the LAST one to be safe.
+function clickVisorToggle() {
+  const btns = getVisorButtons();
+  if (!btns || btns.length === 0) return false;
+
+  const toggleBtn = btns[btns.length - 1]; // usually index 1
+  toggleBtn.click();
+  return true;
+}
+
+function openVisorForTraining() {
+  // just open it (don’t set flags here anymore)
+  try {
+    if (neuralModel?.vis?.visor) {
+      neuralModel.vis.visor().open();
+      return;
+    }
+  } catch (_) {}
+
+  // fallback: use the toggle if it seems closed
+  if (!isVisorOpenNow()) clickVisorToggle();
+}
+
+// retry close until data-isopen becomes false (React state can lag)
+function closeVisorWithRetries({ tries = 8, delayMs = 200 } = {}) {
+  let attempt = 0;
+
+  const tick = () => {
+    attempt++;
+
+    // if already closed, stop
+    if (!isVisorOpenNow()) return;
+
+    // try to close
+    const clicked = clickVisorToggle();
+
+    // if we couldn't click (buttons not ready yet), still retry
+    if (attempt < tries) {
+      setTimeout(tick, delayMs);
+    }
+  };
+
+  tick();
+}
+
+function autoCloseVisorAfterTraining() {
+  // Only close if it was closed when user pressed Train
+  if (visorWasOpenAtTrainStart) return;
+
+  // Delay a bit so the final epoch rendering doesn’t re-open it
+  setTimeout(() => closeVisorWithRetries({ tries: 10, delayMs: 200 }), 400);
+}
 
 /* -----------------------------
    p5 entry point (NOT async)
@@ -27,7 +106,6 @@ function setup() {
 async function init() {
   console.log("Starting init...");
 
-  // Guard: libs loaded
   if (typeof ml5 === "undefined") {
     throw new Error("ml5 is not loaded. Check your <script> order.");
   }
@@ -35,21 +113,17 @@ async function init() {
     throw new Error("PapaParse is not loaded. Add papaparse CDN in index.html.");
   }
 
-  // Use the TF instance that ml5 uses (prevents version mismatch)
   tf = ml5.tf;
   if (!tf) {
     throw new Error("ml5.tf not available. ml5 may not have loaded correctly.");
   }
 
-  // Backend init
   await initTensorFlowBackend();
 
-  // UI
   setupButtons();
   setDate();
   setTrainStatus("Loading dataset…", "status-info");
 
-  // Data
   await loadCSVData();
 
   isModelReady = true;
@@ -61,7 +135,6 @@ async function init() {
    TF backend init
 ------------------------------ */
 async function initTensorFlowBackend() {
-  // Prefer WebGL, fallback to CPU
   try {
     await tf.setBackend("webgl");
     await tf.ready();
@@ -73,7 +146,6 @@ async function initTensorFlowBackend() {
     console.log("✓ TensorFlow backend (CPU):", tf.getBackend());
   }
 
-  // Small stabilization pause
   await sleep(200);
 }
 
@@ -93,15 +165,13 @@ function loadCSVData() {
         const rows = Array.isArray(results.data) ? results.data : [];
         console.log(`✓ Loaded ${rows.length} rows from CSV`);
 
-        // Create model
         neuralModel = ml5.neuralNetwork({
           task: "classification",
-          debug: false,
+          debug: true, // enables visor + training graph
           inputs: ["date", "volume", "rate"],
           outputs: ["label"],
         });
 
-        // Add training data
         let count = 0;
 
         for (const row of rows) {
@@ -116,19 +186,12 @@ function loadCSVData() {
           if (!Number.isFinite(volume) || !Number.isFinite(rate)) continue;
 
           const dateNum = convertDate(dateStr);
-
-          // Object inputs/outputs = most compatible across ml5 versions
-          neuralModel.addData(
-            { date: dateNum, volume, rate },
-            { label }
-          );
-
+          neuralModel.addData({ date: dateNum, volume, rate }, { label });
           count++;
         }
 
         console.log(`✓ Added ${count} training examples`);
 
-        // Normalize
         try {
           neuralModel.normalizeData();
           console.log("✓ Normalized data");
@@ -189,29 +252,26 @@ function startTraining() {
     return;
   }
 
+  // record visor state at moment Train is pressed
+  visorWasOpenAtTrainStart = isVisorOpenNow();
+
   isTraining = true;
   isTrained = false;
 
   select("#train")?.html("Training…");
   setTrainStatus("Training started… (see console for epoch/loss)", "status-info");
 
+  // open visor for training (after a tick so DOM exists)
+  setTimeout(openVisorForTraining, 0);
+
   console.log("Starting training…");
 
-  const opts = {
-    epochs: 32,
-    batchSize: 32,
-  };
-
-  neuralModel.train(
-    opts,
-    trainingProgress,
-    trainingDone
-  );
+  const opts = { epochs: 32, batchSize: 32 };
+  neuralModel.train(opts, trainingProgress, trainingDone);
 }
 
 function trainingProgress(epoch, loss) {
-  const lossVal =
-    loss && typeof loss.loss === "number" ? loss.loss.toFixed(4) : "…";
+  const lossVal = loss && typeof loss.loss === "number" ? loss.loss.toFixed(4) : "…";
   console.log(`Epoch: ${epoch} - Loss: ${lossVal}`);
 }
 
@@ -224,10 +284,12 @@ function trainingDone() {
   select("#train")?.html("Trained");
   select("#train")?.style("background-color", "#31fa03");
 
-  // Show Predict button
   select("#predict")?.style("display", "inline-block");
 
   setTrainStatus("Training complete. You can predict now.", "status-success");
+
+  // ✅ auto-close only if it was closed when Train started
+  autoCloseVisorAfterTraining();
 }
 
 /* -----------------------------
@@ -264,17 +326,11 @@ function makePrediction() {
   const input = { date: dateVal, volume: volVal, rate: rateVal };
   console.log("Classifying with:", input);
 
-  // Robust classify handling:
-  // - works with callback
-  // - works with Promise return
-  // - works if ml5 passes results as first arg
   try {
     const maybePromise = neuralModel.classify(input, handleResults);
 
     if (maybePromise && typeof maybePromise.then === "function") {
-      maybePromise
-        .then((res) => handleResults(null, res))
-        .catch((err) => handleResults(err, null));
+      maybePromise.then((res) => handleResults(null, res)).catch((err) => handleResults(err, null));
     }
   } catch (err) {
     handleResults(err, null);
@@ -282,7 +338,6 @@ function makePrediction() {
 }
 
 function handleResults(error, results) {
-  // Some ml5 versions pass results array as first arg
   if (Array.isArray(error) && results == null) {
     results = error;
     error = null;
@@ -291,23 +346,16 @@ function handleResults(error, results) {
   if (error) {
     console.error("Prediction error:", error);
     setTrainStatus("Prediction failed (see console).", "status-error");
-    setResult(
-      `<div class="prediction-result"><div class="prediction-label">Prediction failed</div></div>`
-    );
+    setResult(`<div class="prediction-result"><div class="prediction-label">Prediction failed</div></div>`);
     return;
   }
-
-  console.log("Results:", results);
 
   if (!Array.isArray(results) || results.length === 0) {
     setTrainStatus("No prediction results.", "status-warning");
-    setResult(
-      `<div class="prediction-result"><div class="prediction-label">No results</div></div>`
-    );
+    setResult(`<div class="prediction-result"><div class="prediction-label">No results</div></div>`);
     return;
   }
 
-  // Pick top confidence
   let top = results[0];
   for (const r of results) {
     if (typeof r?.confidence === "number" && r.confidence > (top?.confidence ?? -1)) {
@@ -380,7 +428,6 @@ async function fetchLiveData() {
    Helpers
 ------------------------------ */
 function convertDate(dateStr) {
-  // expects YYYY-MM-DD
   const parts = String(dateStr).split("-");
   if (parts.length !== 3) return 0;
 
